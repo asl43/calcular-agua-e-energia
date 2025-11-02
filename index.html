@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Calculadora Água & Energia (Total / Diário / Personalizado)</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; background: #e9f3ff; padding: 18px; color:#123; }
+  h1 { text-align:center; color:#044a94; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; margin-top:14px; }
+  .card { background:#fff; padding:14px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.06); }
+  label{display:block;font-weight:600;margin-top:8px}
+  input,select,button{width:100%;padding:8px;border-radius:8px;border:1px solid #cfdff6}
+  button{background:#044a94;color:#fff;border:none;margin-top:10px;cursor:pointer}
+  .resultado{background:#f5fbff;border-left:4px solid #044a94;padding:10px;margin-top:10px;border-radius:8px;font-family:monospace}
+  .erro{color:#a00;font-weight:700}
+  canvas{background:#fff;border-radius:10px;padding:10px;margin-top:12px}
+  .small{font-size:0.9rem;color:#555}
+</style>
+</head>
+<body>
+<h1>💧⚡ Calculadora Água & Energia — Total / Diário / Personalizado</h1>
+
+<div class="grid">
+  <div class="card">
+    <h2>Água</h2>
+    <label>Leitura anterior (m³)</label>
+    <input id="aguaAnterior" type="number" step="0.01" placeholder="Ex: 1611.50">
+    <label>Leitura atual (m³)</label>
+    <input id="aguaAtual" type="number" step="0.01" placeholder="Ex: 1646.30">
+    <label>Tarifa (R$/m³)</label>
+    <input id="aguaTarifa" type="number" step="0.01" value="4.50">
+
+    <label>Modo de cálculo</label>
+    <select id="aguaModoCalc">
+      <option value="total">Total (todo o consumo do período)</option>
+      <option value="diario">Diário (consumo por dia)</option>
+      <option value="personalizado">Personalizado (data início / fim)</option>
+    </select>
+
+    <div id="aguaDatas" style="display:none">
+      <label>Data início</label>
+      <input id="aguaInicio" type="date">
+      <label>Data fim</label>
+      <input id="aguaFim" type="date">
+    </div>
+
+    <label>Exibir</label>
+    <select id="aguaModoExibir">
+      <option value="simples">Simplificado</option>
+      <option value="detalhado">Detalhado</option>
+    </select>
+
+    <button onclick="executarCalculo('agua')">Calcular Água</button>
+    <div id="resAgua" class="resultado"></div>
+  </div>
+
+  <div class="card">
+    <h2>Energia</h2>
+    <label>Leitura anterior (kWh)</label>
+    <input id="energiaAnterior" type="number" step="0.01" placeholder="Ex: 5388">
+    <label>Leitura atual (kWh)</label>
+    <input id="energiaAtual" type="number" step="0.01" placeholder="Ex: 5510">
+    <label>Tarifa (R$/kWh)</label>
+    <input id="energiaTarifa" type="number" step="0.01" value="0.80">
+
+    <label>Modo de cálculo</label>
+    <select id="energiaModoCalc">
+      <option value="total">Total (todo o consumo do período)</option>
+      <option value="diario">Diário (consumo por dia)</option>
+      <option value="personalizado">Personalizado (data início / fim)</option>
+    </select>
+
+    <div id="energiaDatas" style="display:none">
+      <label>Data início</label>
+      <input id="energiaInicio" type="date">
+      <label>Data fim</label>
+      <input id="energiaFim" type="date">
+    </div>
+
+    <label>Exibir</label>
+    <select id="energiaModoExibir">
+      <option value="simples">Simplificado</option>
+      <option value="detalhado">Detalhado</option>
+    </select>
+
+    <button onclick="executarCalculo('energia')">Calcular Energia</button>
+    <div id="resEnergia" class="resultado"></div>
+  </div>
+</div>
+
+<canvas id="graf" height="140"></canvas>
+
+<script>
+/* ---------- utilitários ---------- */
+function diasInclusivos(inicio, fim){
+  const d1 = new Date(inicio);
+  const d2 = new Date(fim);
+  // se inválido, retorna NaN
+  if (isNaN(d1) || isNaN(d2)) return NaN;
+  // calcular dias inclusivos
+  const diffMs = d2.setHours(0,0,0,0) - d1.setHours(0,0,0,0);
+  return Math.round(diffMs / (1000*60*60*24)) + 1;
+}
+
+/* mostrar/ocultar campos de datas */
+document.getElementById('aguaModoCalc').addEventListener('change', (e)=>{
+  document.getElementById('aguaDatas').style.display = e.target.value === 'personalizado' ? 'block' : 'none';
+});
+document.getElementById('energiaModoCalc').addEventListener('change', (e)=>{
+  document.getElementById('energiaDatas').style.display = e.target.value === 'personalizado' ? 'block' : 'none';
+});
+
+/* estado do gráfico */
+let grafico;
+function desenharGrafico(aguaSimples, aguaDetalhado, energiaSimples, energiaDetalhado){
+  const ctx = document.getElementById('graf').getContext('2d');
+  if (grafico) grafico.destroy();
+  grafico = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels:['Água (R$)','Energia (R$)'],
+      datasets:[
+        { label:'Simplificado', data:[round2(aguaSimples), round2(energiaSimples)] },
+        { label:'Detalhado', data:[round2(aguaDetalhado), round2(energiaDetalhado)] }
+      ]
+    },
+    options:{ responsive:true, plugins:{ legend:{ position:'bottom' } }, scales:{ y:{ beginAtZero:true } } }
+  });
+}
+function round2(v){ return Math.round(v*100)/100; }
+
+/* ---------- cálculos ---------- */
+const PERIODO_PADRAO_DIAS = 30; // período usado como base para "diário" e proporcional
+
+function executarCalculo(tipo){
+  if (tipo === 'agua') calcularAgua();
+  else calcularEnergia();
+}
+
+/* ---------- ÁGUA ---------- */
+function calcularAgua(){
+  const ant = Number(document.getElementById('aguaAnterior').value);
+  const at = Number(document.getElementById('aguaAtual').value);
+  const tarifa = Number(document.getElementById('aguaTarifa').value) || 0;
+  const modoCalc = document.getElementById('aguaModoCalc').value;
+  const modoExibir = document.getElementById('aguaModoExibir').value;
+  const resEl = document.getElementById('resAgua');
+
+  // validações básicas
+  if (isNaN(ant) || isNaN(at)) { resEl.innerHTML = '<div class="erro">Preencha leitura anterior e atual.</div>'; return; }
+  if (at < ant) { resEl.innerHTML = '<div class="erro">Leitura atual não pode ser menor que a anterior.</div>'; return; }
+
+  const consumoTotal = at - ant; // consumo do período (base)
+  let consumoUsado; // m³ que será usado no cálculo (pode ser total, diário, ou proporcional)
+
+  if (modoCalc === 'total') {
+    consumoUsado = consumoTotal;
+  } else if (modoCalc === 'diario') {
+    // consumo por dia (usar como valor por dia)
+    consumoUsado = consumoTotal / PERIODO_PADRAO_DIAS;
+  } else { // personalizado
+    const inicio = document.getElementById('aguaInicio').value;
+    const fim = document.getElementById('aguaFim').value;
+    if (!inicio || !fim) { resEl.innerHTML = '<div class="erro">Preencha data início e fim para cálculo personalizado.</div>'; return; }
+    const dias = diasInclusivos(inicio, fim);
+    if (isNaN(dias) || dias <= 0) { resEl.innerHTML = '<div class="erro">Datas inválidas.</div>'; return; }
+    const consumoPorDia = consumoTotal / PERIODO_PADRAO_DIAS;
+    consumoUsado = consumoPorDia * dias; // proporcional ao número de dias selecionados
+  }
+
+  // cálculos (sempre com consumoUsado)
+  const valorAgua = consumoUsado * tarifa;
+  const valorEsgoto = valorAgua * 0.8;
+  const subtotal = valorAgua + valorEsgoto;
+
+  // simplificado = apenas agua + esgoto (como pedido)
+  const totalSimples = subtotal;
+
+  // detalhado = inclui PIS, COFINS e taxa disponibilidade (ex.: R$25)
+  const pis = subtotal * 0.0165;
+  const cofins = subtotal * 0.076;
+  const taxaDisp = 25.00;
+  const totalDetalhado = subtotal + pis + cofins + taxaDisp;
+
+  // montar saída
+  let txt = '';
+  if (modoCalc === 'diario') txt += `<div class="small">Modo Diário: valores mostrados são por dia.</div>`;
+  else if (modoCalc === 'personalizado') txt += `<div class="small">Modo Personalizado: consumo proporcional ao período escolhido.</div>`;
+
+  txt += `
+    Consumo base: <strong>${consumoTotal.toFixed(2)} m³</strong><br>
+    Consumo usado no cálculo: <strong>${consumoUsado.toFixed(2)} m³</strong><br>
+    Tarifa: R$ ${tarifa.toFixed(2)} / m³<br><br>
+    Água: R$ ${valorAgua.toFixed(2)}<br>
+    Esgoto (80%): R$ ${valorEsgoto.toFixed(2)}<br>
+  `;
+
+  if (modoExibir === 'simples') {
+    txt += `<br><strong>Total (Simplificado): R$ ${totalSimples.toFixed(2)}</strong>`;
+  } else {
+    txt += `
+      PIS (1,65%): R$ ${pis.toFixed(2)}<br>
+      COFINS (7,6%): R$ ${cofins.toFixed(2)}<br>
+      Taxa disponibilidade: R$ ${taxaDisp.toFixed(2)}<br>
+      <br><strong>Total (Detalhado): R$ ${totalDetalhado.toFixed(2)}</strong>
+    `;
+  }
+
+  resEl.innerHTML = txt;
+
+  // atualizar gráfico (passar ambos valores de água; energia serão preenchidos pelos últimos calculos ou 0)
+  const atualEnergia = window._ultimoEnergia || { simples:0, detalhado:0 };
+  window._ultimoAgua = { simples: totalSimples, detalhado: totalDetalhado };
+  desenharGrafico(window._ultimoAgua.simples, window._ultimoAgua.detalhado, atualEnergia.simples, atualEnergia.detalhado);
+}
+
+/* ---------- ENERGIA ---------- */
+function calcularEnergia(){
+  const ant = Number(document.getElementById('energiaAnterior').value);
+  const at = Number(document.getElementById('energiaAtual').value);
+  const tarifa = Number(document.getElementById('energiaTarifa').value) || 0;
+  const modoCalc = document.getElementById('energiaModoCalc').value;
+  const modoExibir = document.getElementById('energiaModoExibir').value;
+  const resEl = document.getElementById('resEnergia');
+
+  if (isNaN(ant) || isNaN(at)) { resEl.innerHTML = '<div class="erro">Preencha leitura anterior e atual.</div>'; return; }
+  if (at < ant) { resEl.innerHTML = '<div class="erro">Leitura atual não pode ser menor que a anterior.</div>'; return; }
+
+  const consumoTotal = at - ant;
+  let consumoUsado;
+
+  if (modoCalc === 'total') {
+    consumoUsado = consumoTotal;
+  } else if (modoCalc === 'diario') {
+    consumoUsado = consumoTotal / PERIODO_PADRAO_DIAS;
+  } else {
+    const inicio = document.getElementById('energiaInicio').value;
+    const fim = document.getElementById('energiaFim').value;
+    if (!inicio || !fim) { resEl.innerHTML = '<div class="erro">Preencha data início e fim para cálculo personalizado.</div>'; return; }
+    const dias = diasInclusivos(inicio, fim);
+    if (isNaN(dias) || dias <= 0) { resEl.innerHTML = '<div class="erro">Datas inválidas.</div>'; return; }
+    const consumoPorDia = consumoTotal / PERIODO_PADRAO_DIAS;
+    consumoUsado = consumoPorDia * dias;
+  }
+
+  // cálculos
+  const valorEnergia = consumoUsado * tarifa;
+  const impostosSimples = valorEnergia * 0.20; // simplificado usa "impostos genéricos 20%"
+  const totalSimples = valorEnergia + impostosSimples;
+
+  // detalhado: bandeira (ex: R$0,01/kWh), ICMS 18%, PIS/COFINS, CIP R$15
+  const bandeiraRate = 0.01; // exemplo
+  const bandeira = consumoUsado * bandeiraRate;
+  const icms = valorEnergia * 0.18;
+  const pis = valorEnergia * 0.0165;
+  const cofins = valorEnergia * 0.076;
+  const cip = 15.00;
+  const totalDetalhado = valorEnergia + bandeira + icms + pis + cofins + cip;
+
+  // montar saída
+  let txt = '';
+  if (modoCalc === 'diario') txt += `<div class="small">Modo Diário: valores mostrados são por dia.</div>`;
+  else if (modoCalc === 'personalizado') txt += `<div class="small">Modo Personalizado: consumo proporcional ao período escolhido.</div>`;
+
+  txt += `
+    Consumo base: <strong>${consumoTotal.toFixed(2)} kWh</strong><br>
+    Consumo usado no cálculo: <strong>${consumoUsado.toFixed(2)} kWh</strong><br>
+    Tarifa: R$ ${tarifa.toFixed(2)} / kWh<br><br>
+    Energia: R$ ${valorEnergia.toFixed(2)}<br>
+  `;
+
+  if (modoExibir === 'simples') {
+    txt += `Impostos (20%): R$ ${impostosSimples.toFixed(2)}<br><br><strong>Total (Simplificado): R$ ${totalSimples.toFixed(2)}</strong>`;
+  } else {
+    txt += `
+      Bandeira (R$ ${bandeiraRate.toFixed(2)}/kWh): R$ ${bandeira.toFixed(2)}<br>
+      ICMS (18%): R$ ${icms.toFixed(2)}<br>
+      PIS (1,65%): R$ ${pis.toFixed(2)}<br>
+      COFINS (7,6%): R$ ${cofins.toFixed(2)}<br>
+      CIP: R$ ${cip.toFixed(2)}<br><br>
+      <strong>Total (Detalhado): R$ ${totalDetalhado.toFixed(2)}</strong>
+    `;
+  }
+
+  resEl.innerHTML = txt;
+
+  // atualizar gráfico usando os últimos valores de água (ou 0 se não houver)
+  const atualAgua = window._ultimoAgua || { simples:0, detalhado:0 };
+  window._ultimoEnergia = { simples: totalSimples, detalhado: totalDetalhado };
+  desenharGrafico(atualAgua.simples, atualAgua.detalhado, window._ultimoEnergia.simples, window._ultimoEnergia.detalhado);
+}
+
+/* Inicia gráfico vazio */
+desenharGrafico(0,0,0,0);
+</script>
+</body>
+</html>
