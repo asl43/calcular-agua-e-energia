@@ -21,6 +21,15 @@
 </style>
 </head>
 <body>
+  // auth.js — proteção de acesso
+(function() {
+  const user = localStorage.getItem('usuario');
+  if (!user) {
+    alert("Acesso negado! Faça login para continuar.");
+    window.location.href = "/login.html"; // redireciona para o login
+  }
+})();
+
 <h1>💧⚡ Calculadora Água & Energia — Total / Diário / Personalizado</h1>
 
 <div class="grid">
